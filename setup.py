@@ -2,22 +2,24 @@
 # https://stackoverflow.com/questions/46784964/create-package-with-cython-so-users-can-install-it-without-having-cython-already
 # https://stackoverflow.com/questions/2379898/make-distutils-look-for-numpy-header-files-in-the-correct-place
 # https://cython.readthedocs.io/en/latest/src/userguide/source_files_and_compilation.html#distributing-cython-modules
-from distutils.core import setup
-from distutils.extension import Extension
 from glob import glob
 import os
+from setuptools.command.build_ext import build_ext
 
 # Checks If Cython Is Installed
 try:
-    from Cython.setuptools import build_ext
-except:
+    from Cython.Build import cythonize
+except Exception as e:
+    print(e)
     # If we couldn't import Cython, use the normal setuptools
     # and look for a pre-compiled .c file instead of a .pyx file
-    from setuptools.command.build_ext import build_ext
     USING_CYTHON = False
 else:
     # If we successfully imported Cython, look for a .pyx file
     USING_CYTHON = True
+
+from distutils.core import setup
+from distutils.extension import Extension
 
 class CustomBuildExtCommand(build_ext):
     """build_ext command for use when numpy headers are needed."""
@@ -49,7 +51,7 @@ setup(
     author_email='jknigh28@gmail.com',
     cmdclass={'build_ext': CustomBuildExtCommand},
     install_requires=['numpy'],
-    ext_modules=ext_modules,
+    ext_modules=cythonize(ext_modules, language_level=3, annotate=True),
     packages=['knn'],
     zip_safe=False
 )
