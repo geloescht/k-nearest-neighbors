@@ -2,7 +2,7 @@ import cython
 import numpy as np
 cimport numpy as np
 import math
-from knn.distance_metrics cimport _euclidean, _euclidean_pairwise, _manhattan, _manhattan_pairwise, _hamming,\
+from .distance_metrics cimport _euclidean, _euclidean_pairwise, _manhattan, _manhattan_pairwise, _hamming,\
     _hamming_pairwise
 cimport knn.heapq as heapq
 

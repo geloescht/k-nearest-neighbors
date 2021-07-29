@@ -252,7 +252,7 @@ cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* con
     
     # read in all rows
     data = None
-    sql = f'SELECT rowid, "{field}" FROM "{table}"'
+    sql = f'SELECT rowid, "{field}" FROM "{table}" WHERE "{field}" IS NOT NULL'
     i = 0
     
     cdef sqlite3_stmt *statement
@@ -266,10 +266,10 @@ cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* con
         array = load_array_from_blob(sqlite.column_value(statement, 1))
         id = sqlite.column_int64(statement, 0)
         if data is None:
-            data = np.zeros_like(array, shape=(count, array.flatten().shape[0]))
+            data = np.zeros_like(array, shape=(count, array.flatten().shape[0]), order='C')
             attrs.data = data
             attrs.data_view = memoryview(data)
-            attrs.rowids = np.zeros(shape=(count, ), dtype=np.int64)
+            attrs.rowids = np.zeros(shape=(count, ), dtype=np.int64, order='C')
             attrs.rowids_view = memoryview(attrs.rowids)
         data[i] = array.flatten()
         attrs.rowids[i] = id
@@ -528,6 +528,7 @@ cdef int balltree_vtab_filter(sqlite3_vtab_cursor* sqlite_cursor, int idxNum, co
     attrs.query = load_array_from_blob(argv[0])
     if attrs.query is None:
         return SQLITE_ERROR
+    attrs.query = attrs.query.flatten()
     
     cursor.strategy = idxNum
     cursor.flags = idxStr[0]
@@ -606,7 +607,7 @@ cdef int balltree_vtab_filter_tree(sqlite3_vtab_cursor* sqlite_cursor, int idxNu
     cdef balltree_vtab* vtab = <balltree_vtab*>sqlite_cursor.pVtab
     cdef BallTreeAttrs vtab_attrs = <BallTreeAttrs>vtab.balltree_attrs
     
-    attrs.cursor = Cursor(vtab_attrs.tree, attrs.query.flatten())
+    attrs.cursor = Cursor(vtab_attrs.tree, attrs.query)
     
     if argc >= 2:
         cursor.max_distance = sqlite.value_double(argv[1])
@@ -711,7 +712,7 @@ cdef int balltree_vtab_filter_id(sqlite3_vtab_cursor* sqlite_cursor, int idxNum,
             return balltree_vtab_advance_to_eof(cursor)
     
     cursor.current_i = 0
-    cursor.current_distance = np.linalg.norm((vtab_attrs.data[cursor.current_id] - attrs.query).flatten())
+    cursor.current_distance = np.linalg.norm((vtab_attrs.data[cursor.current_id] - attrs.query))
     
     return SQLITE_OK
 
@@ -744,7 +745,7 @@ cdef int balltree_vtab_next_id(sqlite3_vtab_cursor* sqlite_cursor) with gil:
             return balltree_vtab_advance_to_eof(cursor)
     
     cursor.current_id = i
-    cursor.current_distance = np.linalg.norm((vtab_attrs.data_view[cursor.current_id] - attrs.query).flatten())
+    cursor.current_distance = np.linalg.norm((vtab_attrs.data_view[cursor.current_id] - attrs.query))
     cursor.current_i += 1
     
     return SQLITE_OK
