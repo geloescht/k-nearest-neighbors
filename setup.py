@@ -39,7 +39,7 @@ ext = 'pyx' if USING_CYTHON else 'c'
 sources = glob('knn/*.%s' % (ext,))
 ext_modules = [
     Extension(source.split('.')[0].replace(os.path.sep, '.'),
-              sources=[source],)
+              sources=[source], export_symbols = ["sqlite3_extension_init"] if "sqlite" in source else [])
     for source in sources]
 
 setup(

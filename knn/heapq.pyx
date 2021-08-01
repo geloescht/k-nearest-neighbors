@@ -178,10 +178,24 @@ cdef inline void _simple_siftup(heap_item[::1] heap, aux_item[::1] aux, long pos
     heap[pos], aux[pos] = newitem, newauxitem
     _simple_siftdown(heap, aux, startpos, pos, ht)
 
-cdef extern int __builtin_clzl (unsigned long) nogil
+cdef extern from *:
+     cdef void EMIT_IF_MSVC "#ifdef _MSC_VER //" () nogil
+     cdef void EMIT_ELSE "#else //" () nogil
+     cdef void EMIT_ENDIF "#endif //" () nogil
+
+cdef extern from "intrinsics.h":
+    unsigned int __lzcnt(unsigned int value) nogil
+    int __builtin_clzl (unsigned long) nogil
 
 cdef inline int _heaplevel(long i) nogil:
-    return __builtin_clzl(1ul) ^ __builtin_clzl(i+1)
+    cdef int ret
+    EMIT_IF_MSVC()
+    ret = __lzcnt(1) ^ __lzcnt(i+1)
+    EMIT_ELSE()
+    ret = __builtin_clzl(1ul) ^ __builtin_clzl(i+1)
+    EMIT_ENDIF()
+    return ret
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
