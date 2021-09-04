@@ -159,7 +159,8 @@ cdef class BallTreeAttrs:
     cdef public np.ndarray data
     cdef public double[:, ::1] data_view
     cdef public BallTree tree
-    cdef public str table_field
+    cdef public str table
+    cdef public str field
 
 ctypedef struct balltree_vtab:
     sqlite3_vtab sqlite_attrs
@@ -223,23 +224,20 @@ cdef double distance_from_blobs(
     return float(np.linalg.norm((a - b).flatten()))
 
 cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* const* argv, sqlite3_vtab **ppVTab, char** pzErr) with gil:
-    if argc != 4:
+    if argc != 5:
         return SQLITE_ERROR
     
     cdef balltree_vtab* new_vtab
     cdef int rc = SQLITE_OK
     cdef BallTreeAttrs attrs = BallTreeAttrs()
     
-    attrs.table_field = argv[3].decode('UTF-8')
+    table = argv[3].decode('UTF-8')
+    field = argv[4].decode('UTF-8')
     
-    try:
-        table, field = attrs.table_field.strip('"').split('.')
-    except ValueError:
-        # TODO error message
-        return SQLITE_ERROR
+    attrs.table, attrs.field = table, field
     
     # count all rows with field in table
-    count_sql = f'SELECT COUNT("{field}") FROM "{table}"'
+    count_sql = f'SELECT COUNT({field}) FROM {table} WHERE {field} IS NOT NULL'
     
     cdef sqlite3_stmt *count_statement
     rc = sqlite.prepare_v2(db, count_sql.encode('UTF-8'), -1, &count_statement, NULL)
@@ -259,7 +257,7 @@ cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* con
     
     # read in all rows
     data = None
-    sql = f'SELECT rowid, "{field}" FROM "{table}" WHERE "{field}" IS NOT NULL'
+    sql = f'SELECT rowid, {field} FROM {table} WHERE {field} IS NOT NULL'
     i = 0
     
     cdef sqlite3_stmt *statement
