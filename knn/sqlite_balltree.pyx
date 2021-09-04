@@ -4,8 +4,8 @@ cimport numpy as np
 from libc.stdio cimport printf
 from libc.string cimport strcpy, strlen
 from io import BytesIO
-from knn.ball_tree cimport BallTree, Cursor
-from knn.ball_tree import BallTree, Cursor
+from .ball_tree cimport BallTree, Cursor
+from .ball_tree import BallTree, Cursor
 from cpython.object cimport PyObject
 from cpython.ref cimport Py_INCREF, Py_DECREF
 
@@ -101,7 +101,9 @@ cdef extern from "sqlite3ext.h":
                           void (*xFinal)(sqlite3_context*)) nogil
         int (*create_module)(sqlite3 *, const char *, const sqlite3_module *, void *) nogil
         void (*result_int)(sqlite3_context*,int) nogil
-        void (*result_int64)(sqlite3_context*, sqlite3_int64)
+        void (*result_int64)(sqlite3_context*, sqlite3_int64) nogil
+        void (*result_double)(sqlite3_context*,double) nogil
+        void (*result_blob)(sqlite3_context*, const void*, int, void(*)(void*)) nogil
         int  (*value_type)(sqlite3_value*) nogil
         int  (*value_bytes)(sqlite3_value*) nogil
         sqlite3_int64 (*value_int64)(sqlite3_value*) nogil
@@ -111,7 +113,6 @@ cdef extern from "sqlite3ext.h":
         const void* (*value_blob)(sqlite3_value*) nogil
         sqlite3_value* (*column_value)(sqlite3_stmt*, int) nogil
         double (*value_double)(sqlite3_value*) nogil
-        void  (*result_double)(sqlite3_context*,double) nogil
         int (*declare_vtab)(sqlite3 *db, const char *zCreateTable) nogil
         void * (*malloc)(int) nogil
         void (*free)(void*) nogil
@@ -131,6 +132,7 @@ cdef extern from "sqlite3ext.h":
     cdef int SQLITE_CONSTRAINT
     cdef int SQLITE_CONFIG_LOG
     cdef int SQLITE_ROW
+    cdef int SQLITE_TRANSIENT
     
     cdef unsigned char SQLITE_INDEX_CONSTRAINT_EQ
     cdef unsigned char SQLITE_INDEX_CONSTRAINT_GT
@@ -203,6 +205,11 @@ cdef np.ndarray load_array_from_blob(sqlite3_value* value):
     cdef int size = sqlite.value_bytes(value)
     cdef const unsigned char[::1] raw = <const unsigned char[:size:1]>sqlite.value_blob(value)
     return np.load(BytesIO(raw))
+
+cdef bytes encode_array_as_buffer(np.ndarray array):
+    f = BytesIO()
+    np.save(f, array)
+    return f.getvalue()
 
 cdef double distance_from_blobs(
       sqlite3_value* blob_a,
@@ -766,6 +773,79 @@ cdef void numpydist(
     
     sqlite.result_double(context, float(dist))
 
+cdef void numpymult(
+      sqlite3_context *context,
+      int argc,
+      sqlite3_value **argv
+    ) with gil:
+    assert argc == 2
+    
+    a = load_array_from_blob(argv[0])
+    b = load_array_from_blob(argv[1])
+    if a is None or b is None:
+        return
+    
+    result = a * b
+    
+    cdef const unsigned char[::1] result_buffer = memoryview(encode_array_as_buffer(result))
+    sqlite.result_blob(context, &(result_buffer[0]), len(result_buffer), <void (*)(void *)>SQLITE_TRANSIENT)
+
+cdef void numpyallgt(
+      sqlite3_context *context,
+      int argc,
+      sqlite3_value **argv
+    ) with gil:
+    assert argc == 2
+    
+    a = load_array_from_blob(argv[0])
+    b = load_array_from_blob(argv[1])
+    if a is None or b is None:
+        return
+    
+    sqlite.result_int(context, 1 if (a > b).all() else 0)
+
+cdef void numpyanygt(
+      sqlite3_context *context,
+      int argc,
+      sqlite3_value **argv
+    ) with gil:
+    assert argc == 2
+    
+    a = load_array_from_blob(argv[0])
+    b = load_array_from_blob(argv[1])
+    if a is None or b is None:
+        return
+    
+    sqlite.result_int(context, 1 if (a > b).any() else 0)
+
+cdef void numpyalllt(
+      sqlite3_context *context,
+      int argc,
+      sqlite3_value **argv
+    ) with gil:
+    assert argc == 2
+    
+    a = load_array_from_blob(argv[0])
+    b = load_array_from_blob(argv[1])
+    if a is None or b is None:
+        return
+    
+    sqlite.result_int(context, 1 if (a < b).all() else 0)
+
+cdef void numpyanylt(
+      sqlite3_context *context,
+      int argc,
+      sqlite3_value **argv
+    ) with gil:
+    assert argc == 2
+    
+    a = load_array_from_blob(argv[0])
+    b = load_array_from_blob(argv[1])
+    if a is None or b is None:
+        return
+    
+    sqlite.result_int(context, 1 if (a < b).any() else 0)
+
 firsttime = True
 
 cdef sqlite3_module balltree_module = [
@@ -796,6 +876,32 @@ cdef public int sqlite3_extension_init(
                        NULL, numpydist, NULL, NULL)
         if rc != SQLITE_OK:
             return rc
+        rc = sqlite.create_function(db, "numpymult", 2,
+                       SQLITE_UTF8|SQLITE_DETERMINISTIC,
+                       NULL, numpymult, NULL, NULL)
+        if rc != SQLITE_OK:
+            return rc
+        rc = sqlite.create_function(db, "numpyallgt", 2,
+                       SQLITE_UTF8|SQLITE_DETERMINISTIC,
+                       NULL, numpyallgt, NULL, NULL)
+        if rc != SQLITE_OK:
+            return rc
+        rc = sqlite.create_function(db, "numpyanygt", 2,
+                       SQLITE_UTF8|SQLITE_DETERMINISTIC,
+                       NULL, numpyanygt, NULL, NULL)
+        if rc != SQLITE_OK:
+            return rc
+        rc = sqlite.create_function(db, "numpyalllt", 2,
+                       SQLITE_UTF8|SQLITE_DETERMINISTIC,
+                       NULL, numpyalllt, NULL, NULL)
+        if rc != SQLITE_OK:
+            return rc
+        rc = sqlite.create_function(db, "numpyanylt", 2,
+                       SQLITE_UTF8|SQLITE_DETERMINISTIC,
+                       NULL, numpyanylt, NULL, NULL)
+        if rc != SQLITE_OK:
+            return rc
+        
         rc = sqlite.create_module(db, "balltree", &balltree_module, NULL)
         if rc != SQLITE_OK:
             return rc
