@@ -237,28 +237,34 @@ cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* con
     attrs.table, attrs.field = table, field
     
     # count all rows with field in table
-    count_sql = f'SELECT COUNT({field}) FROM {table} WHERE {field} IS NOT NULL'
+    #count_sql = f'SELECT COUNT({field}) FROM {table} WHERE {field} IS NOT NULL'
     
-    cdef sqlite3_stmt *count_statement
-    rc = sqlite.prepare_v2(db, count_sql.encode('UTF-8'), -1, &count_statement, NULL)
-    if rc != SQLITE_OK:
-        msg = sqlite.errmsg(db);
-        print("Prepare error", rc, msg.decode('UTF-8'))
-        return rc
+    #if __debug__:
+    #    print("balltree_vtab_create: Counting rows with statement:", count_sql)
     
-    rc = sqlite.step(count_statement)
-    if rc != SQLITE_ROW:
-        return rc
+    #cdef sqlite3_stmt *count_statement
+    #rc = sqlite.prepare_v2(db, count_sql.encode('UTF-8'), -1, &count_statement, NULL)
+    #if rc != SQLITE_OK:
+    #    msg = sqlite.errmsg(db);
+    #    print("Prepare error", rc, msg.decode('UTF-8'))
+    #    return rc
     
-    count = sqlite.column_int64(count_statement, 0)
-    rc = sqlite.finalize(count_statement)
-    if rc != SQLITE_OK:
-        return rc
+    #rc = sqlite.step(count_statement)
+    #if rc != SQLITE_ROW:
+    #    return rc
+    
+    #count = sqlite.column_int64(count_statement, 0)
+    #rc = sqlite.finalize(count_statement)
+    #if rc != SQLITE_OK:
+    #    return rc
     
     # read in all rows
     data = None
-    sql = f'SELECT rowid, {field} FROM {table} WHERE {field} IS NOT NULL'
+    sql = f'SELECT rowid, {field}, COUNT(*) OVER () FROM {table} WHERE {field} IS NOT NULL'
     i = 0
+    
+    if __debug__:
+        print("balltree_vtab_create: Reading data with statement:", sql)
     
     cdef sqlite3_stmt *statement
     rc = sqlite.prepare_v2(db, sql.encode('UTF-8'), -1, &statement, NULL)
@@ -271,6 +277,7 @@ cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* con
         array = load_array_from_blob(sqlite.column_value(statement, 1))
         id = sqlite.column_int64(statement, 0)
         if data is None:
+            count = sqlite.column_int64(statement, 2)
             data = np.zeros_like(array, shape=(count, array.flatten().shape[0]), order='C')
             attrs.data = data
             attrs.data_view = memoryview(data)
@@ -279,6 +286,9 @@ cdef int balltree_vtab_create(sqlite3* db, void* pAux, int argc, const char* con
         data[i] = array.flatten()
         attrs.rowids[i] = id
         i += 1
+    
+    if __debug__:
+        print("balltree_vtab_create: Building tree")
     
     # data is filled, now build the tree
     attrs.tree = BallTree(data, 3)
