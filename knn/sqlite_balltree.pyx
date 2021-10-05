@@ -6,6 +6,7 @@ from libc.string cimport strcpy, strlen
 from io import BytesIO
 from .ball_tree cimport BallTree, Cursor
 from .ball_tree import BallTree, Cursor
+from .numpy_io cimport _array_from_buffer, _array_to_buffer
 from cpython.object cimport PyObject
 from cpython.ref cimport Py_INCREF, Py_DECREF
 
@@ -205,12 +206,10 @@ cdef np.ndarray load_array_from_blob(sqlite3_value* value):
         return None
     cdef int size = sqlite.value_bytes(value)
     cdef const unsigned char[::1] raw = <const unsigned char[:size:1]>sqlite.value_blob(value)
-    return np.load(BytesIO(raw))
+    return _array_from_buffer(raw)
 
 cdef bytes encode_array_as_buffer(np.ndarray array):
-    f = BytesIO()
-    np.save(f, array)
-    return f.getvalue()
+    return _array_to_buffer(array)
 
 cdef double distance_from_blobs(
       sqlite3_value* blob_a,
